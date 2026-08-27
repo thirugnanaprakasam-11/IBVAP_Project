@@ -1,0 +1,6 @@
+ibvap_env/
+__pycache__/
+*.db
+*.pt
+alerts/
+.DS_Store
