@@ -1,211 +1,578 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IBVAP | Central Command & Tactical Controller</title>
+    <title>IBVAP // Defense Surveillance Command HQ</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        mono: ['"JetBrains Mono"', 'monospace'],
+                        sans: ['"Inter"', 'sans-serif'],
+                    },
+                    colors: {
+                        tactical: {
+                            950: '#04070a',
+                            900: '#0a1017',
+                            800: '#111b27',
+                            700: '#1a293d',
+                            border: '#1f354d',
+                            accent: '#00e5ff',
+                            threat: '#ff3344',
+                            warning: '#ffaa00',
+                            safe: '#00ff88'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
-        body { font-family: 'Share Tech Mono', monospace; background-color: #030704; color: #00ff66; }
-        .glow { text-shadow: 0 0 10px rgba(0, 255, 102, 0.4); }
-        .panel { background-color: #080d0a; border: 1px solid #00ff6633; }
-        .hash-code { font-family: monospace; font-size: 0.68rem; color: #34d399; }
+        body { background-color: #04070a; color: #d1dbe5; }
+        .hud-scanline {
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+            background-size: 100% 3px, 6px 100%;
+        }
+        .glow-accent { text-shadow: 0 0 10px rgba(0, 229, 255, 0.5); }
+        .glow-red { text-shadow: 0 0 10px rgba(255, 51, 68, 0.6); }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: #0a1017; }
+        ::-webkit-scrollbar-thumb { background: #1f354d; border-radius: 2px; }
     </style>
 </head>
-<body class="p-5 h-screen flex flex-col justify-between overflow-hidden">
+<body class="font-sans antialiased h-screen flex flex-col overflow-hidden select-none">
 
-    <!-- HEADER -->
-    <header class="flex justify-between items-center border-b border-green-900/60 pb-3 mb-3">
-        <div>
-            <div class="flex items-center gap-3">
-                <span class="w-3.5 h-3.5 bg-green-500 rounded-full animate-ping"></span>
-                <h1 class="text-2xl font-black tracking-widest text-white glow">IBVAP TACTICAL COMMAND</h1>
-                <span class="text-xs bg-green-950 text-green-400 border border-green-800 px-2 py-0.5 rounded">v2.4 ENTERPRISE</span>
+    <!-- TOP DEFENSE APEX BANNER -->
+    <header class="h-14 bg-tactical-900 border-b border-tactical-border flex items-center justify-between px-4 z-30 shrink-0">
+        <div class="flex items-center space-x-3">
+            <div class="w-8 h-8 rounded border border-cyan-500/40 bg-cyan-950/40 flex items-center justify-center font-mono font-black text-tactical-accent">
+                IB
             </div>
-            <p class="text-xs text-green-500/80 mt-1">EDGE AI SURVEILLANCE • BIOMETRICS • ANPR • IMMUTABLE AUDIT LEDGER</p>
+            <div>
+                <div class="flex items-center space-x-2">
+                    <span class="font-mono font-extrabold text-sm tracking-wider text-white">IBVAP // DEFENSE COMMAND CENTER</span>
+                    <span class="text-[10px] px-1.5 py-0.5 bg-cyan-950 border border-cyan-800 text-cyan-400 font-mono rounded">NODE: border_cam_01</span>
+                </div>
+                <p class="text-[10px] text-gray-400 font-mono tracking-tight">Intelligent Border Video Analytics Platform • Ministry of Defense</p>
+            </div>
         </div>
-        
-        <div class="flex items-center gap-4">
-            <div class="panel px-4 py-1.5 rounded text-right">
-                <p class="text-[10px] text-gray-400">DEFENSE POSTURE</p>
-                <span id="defense-badge" class="text-sm font-bold text-yellow-400">HIGH</span>
+
+        <!-- Real-Time Telemetry Badges -->
+        <div class="flex items-center space-x-3 text-xs font-mono">
+            <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-emerald-950/40 border border-emerald-800/60 text-emerald-400">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span id="tel-network">Network Secure</span>
             </div>
-            <div class="panel px-4 py-1.5 rounded text-right">
-                <p class="text-[10px] text-gray-400">ACTIVE ALERTS</p>
-                <span id="threat-count" class="text-xl font-bold text-red-400">0</span>
+            <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-rose-950/40 border border-rose-800/60 text-rose-400">
+                <span class="w-2 h-2 rounded-full bg-rose-500"></span>
+                <span id="tel-alerts">0 Unack Alerts</span>
             </div>
-            <a href="/api/v1/export/audit-ledger" class="bg-green-900/40 hover:bg-green-700/50 border border-green-500 text-green-300 text-xs px-3 py-2.5 rounded transition flex items-center gap-1.5">
-                ⬇ EXPORT FORENSIC CSV
-            </a>
+            <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-cyan-950/40 border border-cyan-800/60 text-cyan-400">
+                <span id="tel-cams">4 Cams Active</span>
+            </div>
+            <div id="digital-clock" class="px-3 py-1 bg-black/60 border border-tactical-border text-white font-bold rounded">
+                --:--:-- IST
+            </div>
         </div>
     </header>
 
-    <!-- WORKSPACE -->
-    <div class="grid grid-cols-12 gap-4 flex-1 overflow-hidden">
-        
-        <!-- LEFT PANEL: TACTICAL CONTROLLER & NODE STATUS -->
-        <div class="col-span-4 flex flex-col gap-3">
-            
-            <!-- Edge Node Feed Simulator -->
-            <div class="panel rounded-lg p-3.5 flex-1 flex flex-col justify-between">
-                <div class="flex justify-between items-center">
-                    <span class="text-xs font-bold text-white tracking-wide">NODE: BORDER_CAM_01</span>
-                    <span class="text-[10px] bg-red-950 text-red-400 border border-red-800 px-2 py-0.5 rounded animate-pulse">LIVE STREAM</span>
-                </div>
-                
-                <div class="bg-black/90 border border-green-900/80 rounded my-2 flex-1 flex flex-col items-center justify-center p-4 text-center relative overflow-hidden">
-                    <div class="absolute inset-0 opacity-15 bg-[radial-gradient(#00ff66_1px,transparent_1px)] [background-size:12px_12px]"></div>
-                    <p class="text-xs text-green-400 font-bold tracking-widest uppercase">YOLOv8 MPS Engine Active</p>
-                    <p class="text-[11px] text-gray-500 mt-1">Virtual Polygon Zone: Locked</p>
+    <!-- MAIN BODY -->
+    <div class="flex flex-1 overflow-hidden">
+
+        <!-- LEFT TACTICAL NAVIGATION RAIL -->
+        <aside class="w-20 bg-tactical-950 border-r border-tactical-border flex flex-col items-center py-4 space-y-4 shrink-0">
+            <button onclick="switchTab('live')" id="tab-btn-live" class="nav-btn group flex flex-col items-center justify-center w-14 h-14 rounded-lg border border-cyan-500/50 bg-cyan-950/30 text-tactical-accent transition">
+                <svg class="w-5 h-5 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                <span class="text-[9px] font-mono tracking-widest uppercase">Live</span>
+            </button>
+
+            <button onclick="switchTab('history')" id="tab-btn-history" class="nav-btn group flex flex-col items-center justify-center w-14 h-14 rounded-lg border border-transparent hover:border-tactical-border text-gray-400 hover:text-white transition">
+                <svg class="w-5 h-5 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <span class="text-[9px] font-mono tracking-widest uppercase">History</span>
+            </button>
+
+            <button onclick="switchTab('vault')" id="tab-btn-vault" class="nav-btn group flex flex-col items-center justify-center w-14 h-14 rounded-lg border border-transparent hover:border-tactical-border text-gray-400 hover:text-white transition relative">
+                <span id="vault-badge" class="hidden absolute top-2 right-2 w-2 h-2 bg-rose-500 rounded-full"></span>
+                <svg class="w-5 h-5 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>
+                <span class="text-[9px] font-mono tracking-widest uppercase">Vault</span>
+            </button>
+
+            <button onclick="switchTab('personnel')" id="tab-btn-personnel" class="nav-btn group flex flex-col items-center justify-center w-14 h-14 rounded-lg border border-transparent hover:border-tactical-border text-gray-400 hover:text-white transition">
+                <svg class="w-5 h-5 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                <span class="text-[9px] font-mono tracking-widest uppercase">Auth</span>
+            </button>
+        </aside>
+
+        <!-- CONTENT VIEWPORTS CONTAINER -->
+        <main class="flex-1 flex overflow-hidden bg-tactical-950">
+
+            <!-- 1. LIVE VIEW VIEWPORT -->
+            <section id="view-live" class="flex-1 flex overflow-hidden">
+                <!-- Video Quad Grid -->
+                <div class="flex-1 p-3 overflow-y-auto flex flex-col space-y-3">
+                    <div class="flex items-center justify-between pb-1 border-b border-tactical-border">
+                        <div class="flex items-center space-x-2">
+                            <span class="font-mono text-sm font-bold text-white uppercase">Sector Surveillance Grid</span>
+                            <span class="text-xs text-gray-500 font-mono">(4 Nodes Linked • MPS Accelerated)</span>
+                        </div>
+                        <div class="flex space-x-2">
+                            <button onclick="refreshDashboard()" class="px-2.5 py-1 bg-tactical-800 border border-tactical-border hover:border-cyan-500 text-xs font-mono rounded text-cyan-300 transition">
+                                ⟳ Refresh
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 2x2 Grid -->
+                    <div class="grid grid-cols-2 gap-3 flex-1">
+                        <!-- CAM-01 (Primary Edge Camera) -->
+                        <div class="bg-tactical-900 border border-tactical-border rounded overflow-hidden flex flex-col relative group">
+                            <div class="h-7 bg-tactical-800/80 px-2.5 flex items-center justify-between text-xs font-mono border-b border-tactical-border">
+                                <span class="font-bold text-white flex items-center space-x-1.5">
+                                    <span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+                                    <span>CAM-01 • Sector Alpha (Active Node)</span>
+                                </span>
+                                <span class="text-tactical-accent text-[11px]">YOLOv8 + ByteTrack</span>
+                            </div>
+                            <div class="flex-1 bg-black flex items-center justify-center relative overflow-hidden hud-scanline">
+                                <div id="live-feed-placeholder" class="text-center p-4">
+                                    <div class="w-12 h-12 mx-auto mb-2 rounded-full border border-cyan-500/40 flex items-center justify-center text-cyan-400 font-mono text-xs">
+                                        LIVE
+                                    </div>
+                                    <p class="text-xs text-gray-400 font-mono">Edge Camera Feed Active</p>
+                                    <p class="text-[10px] text-gray-600 font-mono">Run main.py for live bounding box ingestion</p>
+                                </div>
+                                <img id="primary-alert-preview" class="hidden absolute inset-0 w-full h-full object-contain" alt="Live Breach Preview">
+                            </div>
+                            <div class="h-7 bg-tactical-900 px-2.5 flex items-center justify-between text-[11px] font-mono text-gray-400 border-t border-tactical-border">
+                                <span>RES: 1920x1080</span>
+                                <span>FPS: ~28 (MPS)</span>
+                                <span class="text-emerald-400">STATUS: MONITORING</span>
+                            </div>
+                        </div>
+
+                        <!-- CAM-02 (Perimeter East) -->
+                        <div class="bg-tactical-900 border border-tactical-border rounded overflow-hidden flex flex-col">
+                            <div class="h-7 bg-tactical-800/80 px-2.5 flex items-center justify-between text-xs font-mono border-b border-tactical-border">
+                                <span class="font-bold text-gray-300">CAM-02 • Perimeter East</span>
+                                <span class="text-gray-500 text-[11px]">STANDBY</span>
+                            </div>
+                            <div class="flex-1 bg-black/80 flex items-center justify-center font-mono text-xs text-gray-600">
+                                [ AUXILIARY NODE CONNECTED - NO BREACH ]
+                            </div>
+                            <div class="h-7 bg-tactical-900 px-2.5 flex items-center justify-between text-[11px] font-mono text-gray-500 border-t border-tactical-border">
+                                <span>RES: 1280x720</span>
+                                <span>FPS: 30</span>
+                                <span class="text-gray-400">READY</span>
+                            </div>
+                        </div>
+
+                        <!-- CAM-03 (Corridor Sector) -->
+                        <div class="bg-tactical-900 border border-tactical-border rounded overflow-hidden flex flex-col">
+                            <div class="h-7 bg-tactical-800/80 px-2.5 flex items-center justify-between text-xs font-mono border-b border-tactical-border">
+                                <span class="font-bold text-gray-300">CAM-03 • Checkpoint Bravo</span>
+                                <span class="text-gray-500 text-[11px]">STANDBY</span>
+                            </div>
+                            <div class="flex-1 bg-black/80 flex items-center justify-center font-mono text-xs text-gray-600">
+                                [ AUXILIARY NODE CONNECTED - NO BREACH ]
+                            </div>
+                            <div class="h-7 bg-tactical-900 px-2.5 flex items-center justify-between text-[11px] font-mono text-gray-500 border-t border-tactical-border">
+                                <span>RES: 1920x1080</span>
+                                <span>FPS: 25</span>
+                                <span class="text-gray-400">READY</span>
+                            </div>
+                        </div>
+
+                        <!-- CAM-04 (Restricted Hangar) -->
+                        <div class="bg-tactical-900 border border-tactical-border rounded overflow-hidden flex flex-col">
+                            <div class="h-7 bg-tactical-800/80 px-2.5 flex items-center justify-between text-xs font-mono border-b border-tactical-border">
+                                <span class="font-bold text-gray-300">CAM-04 • Depot Storage</span>
+                                <span class="text-gray-500 text-[11px]">STANDBY</span>
+                            </div>
+                            <div class="flex-1 bg-black/80 flex items-center justify-center font-mono text-xs text-gray-600">
+                                [ AUXILIARY NODE CONNECTED - NO BREACH ]
+                            </div>
+                            <div class="h-7 bg-tactical-900 px-2.5 flex items-center justify-between text-[11px] font-mono text-gray-500 border-t border-tactical-border">
+                                <span>RES: 1920x1080</span>
+                                <span>FPS: 30</span>
+                                <span class="text-gray-400">READY</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-2 text-[11px] text-gray-400">
-                    <div class="bg-black/40 p-1.5 rounded border border-green-950">FPS: <span class="text-green-400 font-bold">~28</span></div>
-                    <div class="bg-black/40 p-1.5 rounded border border-green-950">ANPR: <span class="text-green-400 font-bold">ARMED</span></div>
-                </div>
-            </div>
+                <!-- Right Alerts Panel -->
+                <div class="w-80 border-l border-tactical-border bg-tactical-900 flex flex-col shrink-0">
+                    <div class="h-10 border-b border-tactical-border flex items-center justify-between px-3 bg-tactical-800/60">
+                        <div class="flex items-center space-x-2">
+                            <span class="w-2 h-2 rounded-full bg-rose-500"></span>
+                            <span class="font-mono text-xs font-bold text-white uppercase tracking-wider">Breach Feed</span>
+                        </div>
+                        <button onclick="ackAllAlerts()" class="text-[10px] font-mono text-gray-400 hover:text-white px-2 py-0.5 border border-tactical-border rounded">
+                            Clear All
+                        </button>
+                    </div>
 
-            <!-- Interactive Hardware Overrides -->
-            <div class="panel rounded-lg p-3.5">
-                <h3 class="text-xs font-bold text-white mb-2 tracking-wider">TACTICAL NODE OVERRIDES</h3>
-                <div class="grid grid-cols-2 gap-2 text-xs">
-                    <button onclick="toggleNightVision()" id="btn-nv" class="p-2 border border-green-700 bg-green-950/40 hover:bg-green-800/50 text-green-300 rounded transition text-left">
-                        🌙 Night Mode: <span id="nv-status" class="font-bold text-white">AUTO</span>
+                    <div id="live-alert-stream" class="flex-1 overflow-y-auto p-2.5 space-y-2">
+                        <!-- Alert cards injected here -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- 2. FOOTAGE HISTORY VIEWPORT -->
+            <section id="view-history" class="hidden flex-1 p-5 overflow-y-auto">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="text-lg font-mono font-bold text-white">CRYPTOGRAPHIC THREAT LEDGER</h2>
+                        <p class="text-xs text-gray-400 font-mono">Immutable SHA-256 and Chain Hash Record of all Perimeter Breaches</p>
+                    </div>
+                    <span class="text-xs font-mono text-cyan-400 border border-cyan-800 px-3 py-1 rounded bg-cyan-950/40">
+                        Tamper-Evident Active
+                    </span>
+                </div>
+
+                <div class="bg-tactical-900 border border-tactical-border rounded overflow-hidden">
+                    <table class="w-full text-left font-mono text-xs">
+                        <thead class="bg-tactical-800 text-gray-300 uppercase tracking-wider border-b border-tactical-border">
+                            <tr>
+                                <th class="p-3">Record ID</th>
+                                <th class="p-3">Timestamp</th>
+                                <th class="p-3">Threat Event</th>
+                                <th class="p-3">Severity</th>
+                                <th class="p-3">Score</th>
+                                <th class="p-3">Chain Hash</th>
+                                <th class="p-3 text-right">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-table-body" class="divide-y divide-tactical-border text-gray-300">
+                            <!-- Injected by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- 3. EVIDENCE VAULT VIEWPORT -->
+            <section id="view-vault" class="hidden flex-1 p-5 overflow-y-auto">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="text-lg font-mono font-bold text-white">EVIDENCE VAULT</h2>
+                        <p class="text-xs text-gray-400 font-mono">Captured Breach Frames & Hash-Verified Snapshots</p>
+                    </div>
+                    <span id="vault-count-tag" class="text-xs font-mono text-gray-400">0 Clips In Vault</span>
+                </div>
+
+                <div id="vault-grid" class="grid grid-cols-3 gap-4">
+                    <!-- Cards injected by JS -->
+                </div>
+            </section>
+
+            <!-- 4. AUTHORIZED PERSONNEL VIEWPORT -->
+            <section id="view-personnel" class="hidden flex-1 p-5 overflow-y-auto">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="text-lg font-mono font-bold text-white">SECURITY PERSONNEL REGISTRY</h2>
+                        <p class="text-xs text-gray-400 font-mono">Authorized Facial Signatures & Tactical Clearance Roster</p>
+                    </div>
+                    <button onclick="toggleAddPersonModal()" class="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-mono text-xs font-bold rounded transition">
+                        + Register Personnel
                     </button>
-                    <button onclick="toggleSiren()" id="btn-siren" class="p-2 border border-red-800 bg-red-950/30 hover:bg-red-800/40 text-red-300 rounded transition text-left">
-                        🚨 Siren: <span id="siren-status" class="font-bold text-white">OFF</span>
-                    </button>
                 </div>
-            </div>
 
-        </div>
-
-        <!-- RIGHT PANEL: INCIDENT LEDGER WITH LIVE SEARCH & ACTIONS -->
-        <div class="col-span-8 panel rounded-lg p-3.5 flex flex-col overflow-hidden">
-            
-            <div class="flex justify-between items-center mb-2.5 gap-4">
-                <h2 class="text-xs font-bold text-white tracking-wide">SURVEILLANCE INCIDENT LEDGER</h2>
-                
-                <!-- Search Bar -->
-                <div class="flex-1 max-w-xs">
-                    <input type="text" id="search-input" onkeyup="filterLedger()" placeholder="Search vehicle, plate, or node..." 
-                           class="w-full bg-black/60 border border-green-900 px-2.5 py-1 text-xs text-green-300 rounded focus:outline-none focus:border-green-500">
+                <div class="bg-tactical-900 border border-tactical-border rounded overflow-hidden">
+                    <table class="w-full text-left font-mono text-xs">
+                        <thead class="bg-tactical-800 text-gray-300 uppercase tracking-wider border-b border-tactical-border">
+                            <tr>
+                                <th class="p-3">Officer Name</th>
+                                <th class="p-3">Tactical Role</th>
+                                <th class="p-3">Badge ID</th>
+                                <th class="p-3">Access Clearance</th>
+                                <th class="p-3">Duty Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="personnel-table-body" class="divide-y divide-tactical-border text-gray-300">
+                            <!-- Injected by JS -->
+                        </tbody>
+                    </table>
                 </div>
-            </div>
+            </section>
 
-            <!-- Table -->
-            <div class="overflow-y-auto flex-1 border border-green-950 rounded">
-                <table class="w-full text-left border-collapse text-xs">
-                    <thead class="sticky top-0 bg-[#060b08] text-green-500 text-[11px] border-b border-green-900">
-                        <tr>
-                            <th class="p-2.5">ID</th>
-                            <th class="p-2.5">NODE</th>
-                            <th class="p-2.5">TIMESTAMP</th>
-                            <th class="p-2.5">EVENT CLASSIFICATION / ANPR</th>
-                            <th class="p-2.5">SHA-256 INTEGRITY HASH</th>
-                            <th class="p-2.5 text-center">ACTION</th>
-                        </tr>
-                    </thead>
-                    <tbody id="alerts-table-body" class="text-gray-300 divide-y divide-green-950/40">
-                        <tr>
-                            <td colspan="6" class="p-6 text-center text-gray-500">Connecting to telemetry network...</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-
-        </div>
-
+        </main>
     </div>
 
-    <!-- FOOTER -->
-    <footer class="mt-2 pt-2 border-t border-green-950 text-[11px] text-gray-500 flex justify-between">
-        <span>HQ API: http://127.0.0.1:8000</span>
-        <span class="text-green-500">ENCRYPTED SOCKET ACTIVE</span>
-    </footer>
+    <!-- ADD PERSON MODAL -->
+    <div id="person-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+        <div class="bg-tactical-900 border border-tactical-border w-full max-w-md p-5 rounded font-mono">
+            <h3 class="text-sm font-bold text-white mb-3 uppercase tracking-wider">Register Authorized Security Signature</h3>
+            <div class="space-y-3 text-xs">
+                <div>
+                    <label class="text-gray-400 block mb-1">Full Name</label>
+                    <input id="p-name" type="text" class="w-full bg-black border border-tactical-border p-2 rounded text-white focus:outline-none focus:border-cyan-500">
+                </div>
+                <div>
+                    <label class="text-gray-400 block mb-1">Tactical Role</label>
+                    <input id="p-role" type="text" class="w-full bg-black border border-tactical-border p-2 rounded text-white focus:outline-none focus:border-cyan-500">
+                </div>
+                <div>
+                    <label class="text-gray-400 block mb-1">Badge ID</label>
+                    <input id="p-badge" type="text" class="w-full bg-black border border-tactical-border p-2 rounded text-white focus:outline-none focus:border-cyan-500">
+                </div>
+                <div>
+                    <label class="text-gray-400 block mb-1">Clearance Level</label>
+                    <select id="p-clearance" class="w-full bg-black border border-tactical-border p-2 rounded text-white focus:outline-none focus:border-cyan-500">
+                        <option>Level 1 - Field Observer</option>
+                        <option>Level 2 - Perimeter Guard</option>
+                        <option>Level 3 - Tactical Commander</option>
+                        <option>Level 4 - Headquarter Master</option>
+                    </select>
+                </div>
+            </div>
+            <div class="mt-5 flex justify-end space-x-2">
+                <button onclick="toggleAddPersonModal()" class="px-3 py-1.5 bg-tactical-800 text-gray-300 text-xs rounded">Cancel</button>
+                <button onclick="submitPerson()" class="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded">Commit to Ledger</button>
+            </div>
+        </div>
+    </div>
 
-    <!-- INTERACTIVE LOGIC SCRIPT -->
+    <!-- JAVASCRIPT APP LOGIC -->
     <script>
-        let currentNightVision = false;
-        let currentSiren = false;
+        let currentTab = 'live';
 
-        async function fetchDashboardData() {
-            const query = document.getElementById('search-input').value;
-            const url = query ? `/api/v1/alerts/latest?query=${encodeURIComponent(query)}` : '/api/v1/alerts/latest';
-            
+        // Digital Clock
+        setInterval(() => {
+            const now = new Date();
+            document.getElementById('digital-clock').innerText = now.toLocaleTimeString('en-US', { hour12: false }) + " IST";
+        }, 1000);
+
+        // Tab Navigation
+        function switchTab(tabId) {
+            currentTab = tabId;
+            ['live', 'history', 'vault', 'personnel'].forEach(t => {
+                document.getElementById(`view-${t}`).classList.add('hidden');
+                const btn = document.getElementById(`tab-btn-${t}`);
+                btn.className = 'nav-btn group flex flex-col items-center justify-center w-14 h-14 rounded-lg border border-transparent hover:border-tactical-border text-gray-400 hover:text-white transition';
+            });
+
+            document.getElementById(`view-${tabId}`).classList.remove('hidden');
+            const activeBtn = document.getElementById(`tab-btn-${tabId}`);
+            activeBtn.className = 'nav-btn group flex flex-col items-center justify-center w-14 h-14 rounded-lg border border-cyan-500/50 bg-cyan-950/30 text-tactical-accent transition';
+
+            refreshCurrentTab();
+        }
+
+        function refreshCurrentTab() {
+            if (currentTab === 'live') fetchAlerts();
+            if (currentTab === 'history') fetchHistory();
+            if (currentTab === 'vault') fetchVault();
+            if (currentTab === 'personnel') fetchPersonnel();
+            fetchTelemetry();
+        }
+
+        // Fetch Telemetry Badges
+        async function fetchTelemetry() {
             try {
-                const res = await fetch(url);
-                if (!res.ok) throw new Error("API Offline");
+                const res = await fetch('/api/v1/telemetry');
                 const data = await res.json();
-                
-                document.getElementById('threat-count').textContent = data.active_threats;
-                document.getElementById('defense-badge').textContent = data.edge_state.defense_level;
-
-                const tableBody = document.getElementById('alerts-table-body');
-                tableBody.innerHTML = '';
-
-                if (data.data.length === 0) {
-                    tableBody.innerHTML = '<tr><td colspan="6" class="p-6 text-center text-gray-500">NO ACTIVE INTRUSIONS LOGGED</td></tr>';
-                    return;
-                }
-
-                data.data.forEach(item => {
-                    const isResolved = item.status === 'RESOLVED';
-                    const row = document.createElement('tr');
-                    row.className = "hover:bg-green-950/20 transition-colors";
-                    row.innerHTML = `
-                        <td class="p-2.5 font-bold text-white">#${item.alert_id}</td>
-                        <td class="p-2.5 text-green-400 font-mono">${item.edge_node_id}</td>
-                        <td class="p-2.5 text-gray-400">${item.timestamp}</td>
-                        <td class="p-2.5 font-bold ${isResolved ? 'text-gray-400 line-through' : 'text-red-400'}">${item.event_type}</td>
-                        <td class="p-2.5 hash-code">${item.image_hash.substring(0, 20)}...</td>
-                        <td class="p-2.5 text-center">
-                            ${isResolved ? 
-                                '<span class="text-gray-500 text-[10px]">RESOLVED</span>' : 
-                                `<button onclick="acknowledgeAlert(${item.alert_id})" class="bg-yellow-950/40 hover:bg-yellow-800/50 border border-yellow-700 text-yellow-300 text-[10px] px-2 py-0.5 rounded transition">ACKNOWLEDGE</button>`
-                            }
-                        </td>
-                    `;
-                    tableBody.appendChild(row);
-                });
-
+                document.getElementById('tel-network').innerText = data.network;
+                document.getElementById('tel-alerts').innerText = `${data.unacknowledged_alerts} Unack Alerts`;
+                document.getElementById('tel-cams').innerText = `${data.active_cameras} Cams Active`;
             } catch (err) {
-                console.error("Dashboard error:", err);
+                console.error("Telemetry fetch failed", err);
             }
         }
 
-        async function acknowledgeAlert(alertId) {
-            await fetch(`/api/v1/alerts/${alertId}/acknowledge`, { method: 'POST' });
-            fetchDashboardData();
+        // Fetch Live Alerts Stream
+        async function fetchAlerts() {
+            try {
+                const res = await fetch('/api/v1/alerts?limit=20');
+                const alerts = await res.json();
+                const container = document.getElementById('live-alert-stream');
+                container.innerHTML = '';
+
+                if (alerts.length === 0) {
+                    container.innerHTML = `<div class="text-center p-4 text-xs font-mono text-gray-600">NO RECENT BREACHES DETECTED</div>`;
+                    return;
+                }
+
+                // Update primary CAM-01 view with latest alert snapshot if available
+                const latest = alerts[0];
+                if (latest) {
+                    const previewImg = document.getElementById('primary-alert-preview');
+                    const placeholder = document.getElementById('live-feed-placeholder');
+                    // Look for matching image in vault
+                    previewImg.src = `/alerts/intrusion_${latest.timestamp.replace(/[- :]/g, '_').split('_')[0]}_*.jpg`; 
+                }
+
+                alerts.forEach(a => {
+                    const isCrit = a.threat_level === 'CRITICAL';
+                    const isHigh = a.threat_level === 'HIGH';
+                    const card = document.createElement('div');
+                    card.className = `p-2.5 rounded border ${isCrit ? 'border-rose-600/70 bg-rose-950/20' : isHigh ? 'border-amber-600/60 bg-amber-950/20' : 'border-tactical-border bg-tactical-800/40'} font-mono text-xs space-y-1.5`;
+
+                    card.innerHTML = `
+                        <div class="flex items-center justify-between">
+                            <span class="font-bold ${isCrit ? 'text-rose-400' : 'text-amber-400'} flex items-center space-x-1">
+                                <span class="w-1.5 h-1.5 rounded-full ${isCrit ? 'bg-rose-500 animate-ping' : 'bg-amber-400'}"></span>
+                                <span>${a.event_type}</span>
+                            </span>
+                            <span class="text-[10px] text-gray-500">${a.timestamp.split(' ')[1] || ''}</span>
+                        </div>
+                        <div class="flex items-center justify-between text-[11px] text-gray-400">
+                            <span>Threat: <strong class="text-white">${a.threat_score}</strong> [${a.threat_level}]</span>
+                            <span>Crossings: <strong>${a.total_crossings}</strong></span>
+                        </div>
+                        <div class="flex items-center justify-between pt-1 border-t border-tactical-border/50 text-[10px]">
+                            <span class="text-gray-500">Node: ${a.edge_node_id}</span>
+                            ${a.acknowledged ? 
+                                `<span class="text-emerald-500 font-bold">ACKNOWLEDGED</span>` : 
+                                `<button onclick="ackAlert(${a.id})" class="px-2 py-0.5 bg-tactical-700 hover:bg-cyan-700 text-white rounded transition">ACK</button>`
+                            }
+                        </div>
+                    `;
+                    container.appendChild(card);
+                });
+            } catch (err) {
+                console.error("Alerts fetch error", err);
+            }
         }
 
-        async function toggleNightVision() {
-            currentNightVision = !currentNightVision;
-            document.getElementById('nv-status').textContent = currentNightVision ? "FORCED ON" : "AUTO";
-            await fetch('/api/v1/control/config', {
+        async function ackAlert(id) {
+            await fetch(`/api/v1/alerts/${id}/ack`, { method: 'POST' });
+            fetchAlerts();
+            fetchTelemetry();
+        }
+
+        async function ackAllAlerts() {
+            await fetch('/api/v1/alerts/ack-all', { method: 'POST' });
+            fetchAlerts();
+            fetchTelemetry();
+        }
+
+        // Fetch History
+        async function fetchHistory() {
+            try {
+                const res = await fetch('/api/v1/alerts?limit=100');
+                const alerts = await res.json();
+                const tbody = document.getElementById('history-table-body');
+                tbody.innerHTML = '';
+
+                alerts.forEach(a => {
+                    const tr = document.createElement('tr');
+                    tr.className = "hover:bg-tactical-800/40 transition";
+                    tr.innerHTML = `
+                        <td class="p-3 font-bold text-white">#${a.id}</td>
+                        <td class="p-3 text-gray-400">${a.timestamp}</td>
+                        <td class="p-3 font-semibold text-cyan-300">${a.event_type}</td>
+                        <td class="p-3"><span class="px-2 py-0.5 rounded text-[10px] ${a.threat_level === 'CRITICAL' ? 'bg-rose-950 text-rose-400 border border-rose-800' : 'bg-amber-950 text-amber-400 border border-amber-800'}">${a.threat_level}</span></td>
+                        <td class="p-3">${a.threat_score}</td>
+                        <td class="p-3 font-mono text-[10px] text-gray-500" title="${a.chain_hash}">${a.chain_hash ? a.chain_hash.substring(0, 14) + '...' : 'GENESIS'}</td>
+                        <td class="p-3 text-right ${a.acknowledged ? 'text-emerald-400' : 'text-rose-400 font-bold'}">${a.acknowledged ? 'VERIFIED' : 'PENDING'}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (err) {
+                console.error("History fetch error", err);
+            }
+        }
+
+        // Fetch Evidence Vault
+        async function fetchVault() {
+            try {
+                const res = await fetch('/api/v1/vault');
+                const clips = await res.json();
+                const grid = document.getElementById('vault-grid');
+                grid.innerHTML = '';
+                document.getElementById('vault-count-tag').innerText = `${clips.length} Clips Stored`;
+
+                clips.forEach(c => {
+                    const card = document.createElement('div');
+                    card.className = "bg-tactical-900 border border-tactical-border rounded overflow-hidden font-mono flex flex-col";
+                    card.innerHTML = `
+                        <div class="h-44 bg-black relative flex items-center justify-center overflow-hidden">
+                            <img src="${c.url}" alt="${c.filename}" class="w-full h-full object-cover">
+                        </div>
+                        <div class="p-3 flex-1 flex flex-col justify-between space-y-2">
+                            <div>
+                                <div class="text-xs font-bold text-white truncate">${c.filename}</div>
+                                <div class="text-[10px] text-gray-500">${c.timestamp} • ${c.size_kb} KB</div>
+                            </div>
+                            <div class="flex items-center justify-between pt-2 border-t border-tactical-border text-xs">
+                                <a href="${c.url}" target="_blank" class="px-2 py-1 bg-tactical-800 hover:bg-cyan-800 text-cyan-300 rounded text-[11px] transition">Inspect</a>
+                                <button onclick="deleteClip('${c.filename}')" class="text-rose-500 hover:text-rose-400 text-[11px]">Purge</button>
+                            </div>
+                        </div>
+                    `;
+                    grid.appendChild(card);
+                });
+            } catch (err) {
+                console.error("Vault fetch error", err);
+            }
+        }
+
+        async function deleteClip(filename) {
+            if (confirm(`Purge ${filename} from cryptographic vault?`)) {
+                await fetch(`/api/v1/vault/${filename}`, { method: 'DELETE' });
+                fetchVault();
+            }
+        }
+
+        // Fetch Personnel
+        async function fetchPersonnel() {
+            try {
+                const res = await fetch('/api/v1/personnel');
+                const staff = await res.json();
+                const tbody = document.getElementById('personnel-table-body');
+                tbody.innerHTML = '';
+
+                staff.forEach(p => {
+                    const tr = document.createElement('tr');
+                    tr.className = "hover:bg-tactical-800/40 transition";
+                    tr.innerHTML = `
+                        <td class="p-3 font-bold text-white">${p.name}</td>
+                        <td class="p-3 text-cyan-400">${p.role}</td>
+                        <td class="p-3 text-gray-400 font-mono">${p.badge_id}</td>
+                        <td class="p-3 text-gray-300">${p.access_level}</td>
+                        <td class="p-3"><span class="px-2 py-0.5 rounded text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800">${p.status}</span></td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (err) {
+                console.error("Personnel fetch error", err);
+            }
+        }
+
+        function toggleAddPersonModal() {
+            document.getElementById('person-modal').classList.toggle('hidden');
+        }
+
+        async function submitPerson() {
+            const name = document.getElementById('p-name').value;
+            const role = document.getElementById('p-role').value;
+            const badge_id = document.getElementById('p-badge').value;
+            const access_level = document.getElementById('p-clearance').value;
+
+            if (!name || !badge_id) return alert("Fill in required details");
+
+            await fetch('/api/v1/personnel', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ night_vision: currentNightVision })
+                body: JSON.stringify({ name, role, badge_id, access_level, status: 'ACTIVE' })
             });
+
+            toggleAddPersonModal();
+            fetchPersonnel();
         }
 
-        async function toggleSiren() {
-            currentSiren = !currentSiren;
-            document.getElementById('siren-status').textContent = currentSiren ? "ACTIVE" : "OFF";
-            await fetch('/api/v1/control/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ alarm_siren: currentSiren })
-            });
+        function refreshDashboard() {
+            refreshCurrentTab();
         }
 
-        function filterLedger() {
-            fetchDashboardData();
-        }
-
-        fetchDashboardData();
-        setInterval(fetchDashboardData, 2000);
+        // Live polling loop (2 seconds)
+        refreshCurrentTab();
+        setInterval(refreshCurrentTab, 2000);
     </script>
 </body>
 </html>
