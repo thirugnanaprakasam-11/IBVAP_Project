@@ -14,13 +14,15 @@ from shapely.geometry import Point, Polygon, LineString
 import easyocr
 import re
 import math
+import threading
+import queue
 
 # ==========================================
-# 0. ADVANCED GEOMETRY SETUP 
+# 0. LIVE MODE STATE
 # ==========================================
-secure_zone_pts = np.array([[100, 240], [540, 240], [600, 460], [40, 460]], np.int32)
-secure_polygon = Polygon(secure_zone_pts)
-PIXELS_PER_METER = 25.0  
+ACTIVE_MODE = "tactical"  
+
+print("[+] INITIALIZING IBVAP ENGINE... READY FOR LIVE MODE SWITCHING")
 
 # ==========================================
 # 1. CORE SYSTEM & DIRECTORY SETUP
@@ -30,7 +32,6 @@ ALERTS_DIR = os.path.join(BASE_DIR, "alerts")
 os.makedirs(ALERTS_DIR, exist_ok=True)
 
 HQ_API_URL = "http://127.0.0.1:8000/api/v1/alerts"
-EDGE_NODE_ID = "border_cam_01"
 JWT_AUTH_TOKEN = "ibvap_secure_edge_auth_2026"
 
 # ==========================================
@@ -44,7 +45,6 @@ def generate_image_hash(filepath):
     return sha256.hexdigest()
 
 def generate_chain_hash(image_hash, previous_chain_hash):
-    """Tamper-Evident Hash Chain (Blockchain logic)"""
     combined = f"{image_hash}{previous_chain_hash}".encode()
     return hashlib.sha256(combined).hexdigest()
 
@@ -92,7 +92,6 @@ cursor.execute('''
 ''')
 conn.commit()
 
-# Backward-compatible upgrade
 for col, coltype in [("chain_hash", "TEXT"), ("threat_score", "REAL"), ("threat_level", "TEXT")]:
     try:
         cursor.execute(f"ALTER TABLE intrusions ADD COLUMN {col} {coltype}")
@@ -100,10 +99,10 @@ for col, coltype in [("chain_hash", "TEXT"), ("threat_score", "REAL"), ("threat_
     except sqlite3.OperationalError: pass 
 
 # ==========================================
-# 3.5 ZERO-TRUST MULTI-ADMIN BIOMETRICS
+# 3.5 ZERO-TRUST BIOMETRICS 
 # ==========================================
-print("Loading Secure Identity Signatures...")
 known_face_encodings, known_face_names = [], []
+print("Loading Secure Identity Signatures into Memory...")
 AUTH_FACES_DIR = os.path.join(BASE_DIR, "authorized_faces")
 os.makedirs(AUTH_FACES_DIR, exist_ok=True)
 for filename in os.listdir(AUTH_FACES_DIR):
@@ -115,6 +114,7 @@ for filename in os.listdir(AUTH_FACES_DIR):
             if enc:
                 known_face_encodings.append(enc[0])
                 known_face_names.append(f"{person_name} - Authorized")
+                print(f"  -> Added signature for: {person_name}")
         except Exception: pass
 
 # ==========================================
@@ -168,6 +168,15 @@ class ThreatEngine:
 # ==========================================
 # 4.5 VISION, ANPR & HUD UTILS
 # ==========================================
+def eradicate_weather(frame):
+    lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+    l_channel, a_channel, b_channel = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    enhanced_l = clahe.apply(l_channel)
+    enhanced_bgr = cv2.cvtColor(cv2.merge((enhanced_l, a_channel, b_channel)), cv2.COLOR_LAB2BGR)
+    gaussian = cv2.GaussianBlur(enhanced_bgr, (0, 0), 2.0)
+    return cv2.addWeighted(enhanced_bgr, 1.3, gaussian, -0.3, 0)
+
 def apply_night_vision(frame):
     lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
@@ -180,19 +189,18 @@ def get_average_brightness(frame):
 def extract_license_plate(vehicle_crop, ocr_engine):
     if vehicle_crop is None or vehicle_crop.size == 0: return None
     vh, vw, _ = vehicle_crop.shape
-    plate_roi = vehicle_crop[int(vh * 0.50):vh, int(vw * 0.05):int(vw * 0.95)]
+    plate_roi = vehicle_crop[int(vh * 0.4):vh, :]
     if plate_roi.size == 0: plate_roi = vehicle_crop
     
     gray = cv2.cvtColor(plate_roi, cv2.COLOR_BGR2GRAY)
-    upscaled = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_LINEAR)
-    enhanced = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(upscaled)
-
-    detections = ocr_engine.readtext(enhanced, allowlist='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', detail=1, paragraph=False)
+    detections = ocr_engine.readtext(gray, allowlist='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', detail=1)
+    
     candidates = []
     for _, text, score in detections:
         clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())
-        if 5 <= len(clean_text) <= 12 and score >= 0.25 and bool(re.search(r'[A-Z]', clean_text)) and bool(re.search(r'[0-9]', clean_text)):
+        if len(clean_text) >= 4 and score >= 0.1:
             candidates.append((clean_text, score))
+            
     if candidates:
         candidates.sort(key=lambda x: x[1], reverse=True)
         return candidates[0][0]
@@ -221,6 +229,10 @@ def draw_threat_hud(frame, threat_score, threat_level, w, h):
 # ==========================================
 # 5. VIDEO & AI ENGINE SETUP
 # ==========================================
+secure_zone_pts = np.array([[100, 240], [540, 240], [600, 460], [40, 460]], np.int32)
+secure_polygon = Polygon(secure_zone_pts)
+PIXELS_PER_METER = 25.0  
+
 LIVE_CAM_ID = 0
 FALLBACK_VIDEO_PATH = os.path.join(BASE_DIR, "test_footage.mp4")
 cap = cv2.VideoCapture(LIVE_CAM_ID)
@@ -230,15 +242,60 @@ model = YOLO("yolov8n.pt")
 ocr_reader = easyocr.Reader(['en'], gpu=False)
 threat_engine = ThreatEngine()
 
+# --- ASYNC BACKGROUND WORKERS ---
+vehicle_plate_cache = {}
+person_id_cache = {} 
+ocr_queue = queue.Queue()
+face_queue = queue.Queue()
+
+def async_ocr_worker():
+    while True:
+        track_id, v_crop = ocr_queue.get()
+        if v_crop is not None:
+            try:
+                plate = extract_license_plate(v_crop, ocr_reader)
+                if plate and track_id in vehicle_plate_cache:
+                    vehicle_plate_cache[track_id]["plate"] = plate
+            except Exception: pass
+        ocr_queue.task_done()
+
+def async_face_worker():
+    while True:
+        track_id, rgb_crop = face_queue.get()
+        if rgb_crop is not None:
+            try:
+                f_locs = face_recognition.face_locations(rgb_crop, model="hog", number_of_times_to_upsample=1)
+                if f_locs:
+                    f_encs = face_recognition.face_encodings(rgb_crop, f_locs)
+                    if f_encs and known_face_encodings:
+                        matches = face_recognition.compare_faces(known_face_encodings, f_encs[0], tolerance=0.6)
+                        if True in matches and track_id in person_id_cache:
+                            matched_name = known_face_names[matches.index(True)]
+                            person_id_cache[track_id]["label"] = matched_name
+                            print(f"\n[BIOMETRIC AUTH] ✅ Match Confirmed: {matched_name}")
+                        elif track_id in person_id_cache and person_id_cache[track_id]["label"] == "PERSON":
+                            person_id_cache[track_id]["label"] = "UNKNOWN INTRUDER"
+                            print(f"\n[BIOMETRIC AUTH] ❌ Match Failed. Classified as Unknown.")
+                else:
+                    pass
+            except Exception as e: 
+                print(f"[BIOMETRIC DEBUG] Error processing face: {e}")
+        face_queue.task_done()
+
+threading.Thread(target=async_ocr_worker, daemon=True).start()
+threading.Thread(target=async_face_worker, daemon=True).start()
+
+# --- CAMOUFLAGE DEFEAT ENGINE ---
+backSub = cv2.createBackgroundSubtractorMOG2(history=300, varThreshold=25, detectShadows=False)
+heatmap_buffer = np.zeros((480, 640), dtype=np.float32)
+camouflage_defeat_active = False
+
 prev_time, last_alert_time = time.time(), 0
 night_vision_active, night_vision_manual_override = False, False
+weather_disturbance = False
 BRIGHTNESS_THRESHOLD = 70  
 frame_count = 0
-
-# CACHING & TRACKING MEMORY 
 vehicle_track_data = {}   
-vehicle_plate_cache = {}  
-person_id_cache = {}      
 
 # ==========================================
 # 6. HIGH-PERFORMANCE SURVEILLANCE LOOP
@@ -255,7 +312,44 @@ while cap.isOpened():
     scale_x, scale_y = orig_w / 640.0, orig_h / 480.0
 
     frame = cv2.resize(original_frame, (640, 480))
+    
+    if frame_count % 15 == 1 or frame_count == 1:
+        gray_check = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        contrast_level = gray_check.std()
+        sharpness_level = cv2.Laplacian(gray_check, cv2.CV_64F).var()
+        weather_disturbance = (contrast_level < 45.0 or sharpness_level < 100.0)
+
+    if weather_disturbance:
+        frame = eradicate_weather(frame)
+    
     annotated_frame = frame.copy()
+
+    # --- CAMOUFLAGE ANOMALY DETECTION ---
+    # Continuously update background model for instant readiness
+    fgMask = backSub.apply(frame)
+
+    if camouflage_defeat_active:
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        fgMask = cv2.morphologyEx(fgMask, cv2.MORPH_OPEN, kernel)
+        
+        # Accumulate residual motion energy
+        heatmap_buffer = cv2.addWeighted(heatmap_buffer, 0.90, fgMask.astype(np.float32), 0.10, 0)
+        
+        # Map to Predator-style Inferno visual
+        heatmap_norm = cv2.normalize(heatmap_buffer, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+        anomaly_color = cv2.applyColorMap(heatmap_norm, cv2.COLORMAP_INFERNO)
+        
+        # Overlay Anomaly Heatmap
+        annotated_frame = cv2.addWeighted(annotated_frame, 0.6, anomaly_color, 0.4, 0)
+
+        # Flag physical anomalies that YOLO neural net might miss
+        contours, _ = cv2.findContours(fgMask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in contours:
+            if cv2.contourArea(cnt) > 900:
+                cx, cy, cw, ch = cv2.boundingRect(cnt)
+                draw_dashed_line(annotated_frame, (cx, cy), (cx + cw, cy), (0, 0, 255), 2)
+                draw_dashed_line(annotated_frame, (cx, cy + ch), (cx + cw, cy + ch), (0, 0, 255), 2)
+                cv2.putText(annotated_frame, "CAMOUFLAGED ANOMALY", (cx, max(20, cy - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
     curr_time = time.time()
     fps = 1 / (curr_time - prev_time) if (curr_time - prev_time) > 0 else 0
@@ -263,6 +357,19 @@ while cap.isOpened():
 
     key = cv2.waitKey(1) & 0xFF
     if key == ord('q'): break
+    elif key == ord('1'): 
+        ACTIVE_MODE = "tactical"
+        print("\n🛡️ SWITCHED TO: TACTICAL MODE")
+    elif key == ord('2'): 
+        ACTIVE_MODE = "traffic"
+        print("\n🚦 SWITCHED TO: TRAFFIC MODE")
+    elif key == ord('3'): 
+        ACTIVE_MODE = "home"
+        print("\n🏠 SWITCHED TO: HOME MODE")
+    elif key == ord('a'): 
+        camouflage_defeat_active = not camouflage_defeat_active
+        if not camouflage_defeat_active: heatmap_buffer = np.zeros((480, 640), dtype=np.float32)
+        print(f"\n🕵️ CAMOUFLAGE DEFEAT: {'ENABLED' if camouflage_defeat_active else 'DISABLED'}")
     elif key == ord('n'): 
         night_vision_manual_override = True
         night_vision_active = not night_vision_active
@@ -275,7 +382,6 @@ while cap.isOpened():
     elif key == ord('v'):
         verify_ledger_integrity(cursor)
 
-    # Adaptive Auto-Night Vision
     if not night_vision_manual_override:
         night_vision_active = get_average_brightness(frame) < BRIGHTNESS_THRESHOLD
     if night_vision_active: 
@@ -285,7 +391,7 @@ while cap.isOpened():
     zone_color = (255, 0, 0)
     
     breach_detected = False
-    current_threat = "VIRTUAL_FENCE_BREACH"
+    current_threat = f"VIRTUAL_FENCE_BREACH ({ACTIVE_MODE.upper()})"
     breach_count_this_frame = 0
 
     for result in results:
@@ -301,7 +407,6 @@ while cap.isOpened():
             foot_x, foot_y = int((x1 + x2) / 2), int(y2)
             foot_point = Point(foot_x, foot_y)
             
-            # --- 1. LIGHTWEIGHT SPEED & TRAJECTORY ---
             current_speed, vx, vy = 0.0, 0.0, 0.0
             if track_id in vehicle_track_data:
                 prev_cx, prev_cy, prev_ts, prev_speed, prev_vx, prev_vy = vehicle_track_data[track_id]
@@ -319,50 +424,52 @@ while cap.isOpened():
             else:
                 vehicle_track_data[track_id] = (foot_x, foot_y, curr_time, 0.0, 0.0, 0.0)
 
-            # --- 2. PREDICTIVE VECTOR DISPLAY ---
             future_x, future_y = int(foot_x + (vx * 2.5)), int(foot_y + (vy * 2.5))
             if abs(vx) > 5 or abs(vy) > 5:
                 if LineString([(foot_x, foot_y), (future_x, future_y)]).intersects(secure_polygon) and not secure_polygon.contains(foot_point):
                     draw_dashed_line(annotated_frame, (foot_x, foot_y), (future_x, future_y), (0, 0, 255), 2)
-                    cv2.putText(annotated_frame, "PREDICTED BREACH", (foot_x, max(20, foot_y - 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
                 else:
                     draw_dashed_line(annotated_frame, (foot_x, foot_y), (future_x, future_y), (0, 255, 0), 2)
 
-            # --- 3. TARGETED BIOMETRICS ---
             person_label = None
-            if class_name == 'PERSON':
-                if track_id not in person_id_cache and frame_count % 6 == 0:
-                    person_crop = frame[max(0, y1):min(480, y2), max(0, x1):min(640, x2)]
+            if class_name == 'PERSON' and ACTIVE_MODE in ["tactical", "home"]:
+                if track_id not in person_id_cache:
+                    person_id_cache[track_id] = {"label": "PERSON", "attempts": 0, "last_checked": 0}
+                
+                p_cache = person_id_cache[track_id]
+                
+                if "Authorized" not in p_cache["label"] and p_cache["attempts"] < 8 and (frame_count - p_cache["last_checked"]) > 10:
+                    orig_y1, orig_y2 = max(0, int(y1 * scale_y)), min(orig_h, int(y2 * scale_y))
+                    orig_x1, orig_x2 = max(0, int(x1 * scale_x)), min(orig_w, int(x2 * scale_x))
+                    
+                    person_crop = original_frame[orig_y1:orig_y2, orig_x1:orig_x2]
+                    
                     if person_crop.size > 0:
                         rgb_crop = cv2.cvtColor(person_crop, cv2.COLOR_BGR2RGB)
-                        f_locs = face_recognition.face_locations(rgb_crop, model="hog")
-                        if f_locs:
-                            f_encs = face_recognition.face_encodings(rgb_crop, f_locs)
-                            if f_encs and known_face_encodings:
-                                matches = face_recognition.compare_faces(known_face_encodings, f_encs[0], tolerance=0.5)
-                                person_id_cache[track_id] = known_face_names[matches.index(True)] if True in matches else "UNKNOWN INTRUDER"
-                            else:
-                                person_id_cache[track_id] = "UNKNOWN INTRUDER"
-                person_label = person_id_cache.get(track_id, "PERSON")
+                        p_cache["attempts"] += 1
+                        p_cache["last_checked"] = frame_count
+                        face_queue.put((track_id, rgb_crop.copy()))
+                        
+                person_label = p_cache["label"]
 
-            # --- 4. BREACH & GATED ANPR ---
             if secure_polygon.contains(foot_point):
                 zone_color = (0, 0, 255)
                 breach_detected = True   
                 breach_count_this_frame += 1
-                current_threat = f"{class_name} BREACH"
 
-                if class_name in ['CAR', 'TRUCK', 'BUS', 'MOTORCYCLE']:
-                    if track_id not in vehicle_plate_cache: vehicle_plate_cache[track_id] = {"plate": None, "attempts": 0}
+                if class_name in ['CAR', 'TRUCK', 'BUS', 'MOTORCYCLE'] and ACTIVE_MODE in ["tactical", "traffic"]:
+                    if track_id not in vehicle_plate_cache: 
+                        vehicle_plate_cache[track_id] = {"plate": None, "attempts": 0, "last_checked": 0}
                     cache_entry = vehicle_plate_cache[track_id]
                     
-                    if cache_entry["plate"] is None and cache_entry["attempts"] < 2:
+                    if cache_entry["plate"] is None and (cache_entry["attempts"] < 8 and (frame_count - cache_entry["last_checked"]) > 12):
                         orig_x1, orig_y1 = max(0, int(x1 * scale_x)), max(0, int(y1 * scale_y))
                         orig_x2, orig_y2 = min(orig_w, int(x2 * scale_x)), min(orig_h, int(y2 * scale_y))
                         v_crop = original_frame[orig_y1:orig_y2, orig_x1:orig_x2]
-                        plate = extract_license_plate(v_crop, ocr_reader)
+                        
                         cache_entry["attempts"] += 1
-                        if plate: cache_entry["plate"] = plate
+                        cache_entry["last_checked"] = frame_count
+                        ocr_queue.put((track_id, v_crop.copy()))
 
                     if cache_entry["plate"]:
                         current_threat = f"{class_name} BREACH (PLATE: {cache_entry['plate']}) @ {int(current_speed)}km/h"
@@ -372,7 +479,6 @@ while cap.isOpened():
                 elif person_label and "UNKNOWN" in person_label:
                     current_threat = "UNKNOWN INTRUDER DETECTED"
 
-            # Draw UI Box
             box_color = (0, 255, 0) if (person_label and "Authorized" in person_label) else (0, 255, 255)
             cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), box_color, 2)
             display_tag = person_label if person_label else f"ID:{track_id} {class_name}"
@@ -382,15 +488,19 @@ while cap.isOpened():
 
     cv2.polylines(annotated_frame, [secure_zone_pts], isClosed=True, color=zone_color, thickness=3)
 
-    # 5. DYNAMIC THREAT HUD PREVIEW
     if breach_detected:
         temp_score, temp_level, _ = threat_engine.score(datetime.now(), breach_count_this_frame, "pending")
         draw_threat_hud(annotated_frame, temp_score, temp_level, 640, 480)
 
-    cv2.putText(annotated_frame, f"IBVAP - FPS: {int(fps)} | {'NIGHT VISION (AUTO)' if (night_vision_active and not night_vision_manual_override) else ('NIGHT VISION' if night_vision_active else 'DAY MODE')}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    hud_text = f"IBVAP [{ACTIVE_MODE.upper()}] - FPS: {int(fps)}"
+    if weather_disturbance:
+        hud_text += " | WEATHER EQ: ACTIVE"
+    if camouflage_defeat_active:
+        hud_text += " | CAMO DEFEAT: ON"
+    cv2.putText(annotated_frame, hud_text, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    
     cv2.imshow("IBVAP Enterprise Suite", annotated_frame)
 
-    # 6. DISPATCH & BLOCKCHAIN LOGGING
     if breach_detected and (curr_time - last_alert_time) > 5.0:
         now_dt = datetime.now()
         timestamp_formatted = now_dt.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
@@ -409,26 +519,16 @@ while cap.isOpened():
         alert_id = cursor.lastrowid
         conn.commit()
 
-        payload = {"edge_node_id": EDGE_NODE_ID, "timestamp": timestamp_formatted, "event_type": current_threat, "total_crossings": breach_count_this_frame, "image_hash": img_hash, "chain_hash": chain_hash, "threat_score": threat_score, "threat_level": threat_level, "jwt_token": JWT_AUTH_TOKEN}
+        dynamic_node_id = f"border_cam_{ACTIVE_MODE}_01"
+        payload = {"edge_node_id": dynamic_node_id, "timestamp": timestamp_formatted, "event_type": current_threat, "total_crossings": breach_count_this_frame, "image_hash": img_hash, "chain_hash": chain_hash, "threat_score": threat_score, "threat_level": threat_level, "jwt_token": JWT_AUTH_TOKEN}
         try:
             requests.post(HQ_API_URL, json=payload, timeout=1.5)
             cursor.execute('UPDATE intrusions SET sync_status = 1 WHERE id = ?', (alert_id,))
             conn.commit()
         except requests.exceptions.RequestException: pass
 
-        print(f"\n🚨 BREACH ALERT | {current_threat} | Score: {threat_score} ({threat_level}) | Chain: {chain_hash[:10]}...")
+        print(f"\n🚨 BREACH ALERT [{ACTIVE_MODE.upper()}] | {current_threat} | Score: {threat_score} ({threat_level})")
         last_alert_time = curr_time 
-
-    # 7. BACKGROUND NETWORK RECOVERY LOOP
-    if int(curr_time) % 3 == 0 and not process_current_frame:
-        cursor.execute('SELECT id, timestamp, event_type, total_crossings, image_hash, chain_hash, threat_score, threat_level FROM intrusions WHERE sync_status = 0')
-        for row in cursor.fetchall():
-            recovery_payload = {"edge_node_id": EDGE_NODE_ID, "timestamp": row[1], "event_type": row[2], "total_crossings": row[3], "image_hash": row[4], "chain_hash": row[5], "threat_score": row[6], "threat_level": row[7], "jwt_token": JWT_AUTH_TOKEN}
-            try:
-                requests.post(HQ_API_URL, json=recovery_payload, timeout=1.5)
-                cursor.execute('UPDATE intrusions SET sync_status = 1 WHERE id = ?', (row[0],))
-                conn.commit()
-            except requests.exceptions.RequestException: break 
 
 cap.release()
 cv2.destroyAllWindows()
