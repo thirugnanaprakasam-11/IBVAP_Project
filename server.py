@@ -3,17 +3,21 @@ import sqlite3
 from datetime import datetime
 from typing import Optional, List
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from camera_map import generate_offline_map
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ALERTS_DIR = os.path.join(BASE_DIR, "alerts")
+TEXTS_DIR = os.path.join(BASE_DIR, "alert_texts")
 HQ_DB_PATH = os.path.join(BASE_DIR, "hq_command.db")
-os.makedirs(ALERTS_DIR, exist_ok=True)
 
-app = FastAPI(title="IBVAP Tactical HQ Backend", version="2.0.0")
+os.makedirs(ALERTS_DIR, exist_ok=True)
+os.makedirs(TEXTS_DIR, exist_ok=True)
+
+app = FastAPI(title="IBVAP Tactical HQ Backend", version="2.5.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,7 +34,6 @@ def init_hq_db():
     conn = sqlite3.connect(HQ_DB_PATH)
     cur = conn.cursor()
     
-    # Alert telemetry table
     cur.execute('''
         CREATE TABLE IF NOT EXISTS hq_alerts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,7 +49,6 @@ def init_hq_db():
         )
     ''')
     
-    # Authorized Personnel table
     cur.execute('''
         CREATE TABLE IF NOT EXISTS authorized_personnel (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,7 +60,6 @@ def init_hq_db():
         )
     ''')
     
-    # Populate default demo personnel if table is empty
     cur.execute('SELECT COUNT(*) FROM authorized_personnel')
     if cur.fetchone()[0] == 0:
         demo_staff = [
@@ -99,10 +100,8 @@ class PersonnelCreate(BaseModel):
     status: Optional[str] = "ACTIVE"
 
 # ----------------------------------------------------
-# API ROUTES
+# CORE HQ API ROUTES
 # ----------------------------------------------------
-
-# Ingest from edge nodes (main.py)
 @app.post("/api/v1/alerts")
 def receive_edge_alert(payload: EdgeAlertPayload):
     if payload.jwt_token != "ibvap_secure_edge_auth_2026":
@@ -124,7 +123,6 @@ def receive_edge_alert(payload: EdgeAlertPayload):
     conn.close()
     return {"status": "SUCCESS", "hq_record_id": alert_id}
 
-# Fetch alerts with optional search & filter
 @app.get("/api/v1/alerts")
 def get_alerts(limit: int = 50, acknowledged: Optional[int] = None):
     conn = sqlite3.connect(HQ_DB_PATH)
@@ -150,7 +148,6 @@ def get_alerts(limit: int = 50, acknowledged: Optional[int] = None):
         for r in rows
     ]
 
-# Acknowledge single alert
 @app.post("/api/v1/alerts/{alert_id}/ack")
 def acknowledge_alert(alert_id: int):
     conn = sqlite3.connect(HQ_DB_PATH)
@@ -160,7 +157,6 @@ def acknowledge_alert(alert_id: int):
     conn.close()
     return {"status": "ACKNOWLEDGED", "id": alert_id}
 
-# Acknowledge all alerts
 @app.post("/api/v1/alerts/ack-all")
 def acknowledge_all_alerts():
     conn = sqlite3.connect(HQ_DB_PATH)
@@ -170,7 +166,6 @@ def acknowledge_all_alerts():
     conn.close()
     return {"status": "ALL_ACKNOWLEDGED"}
 
-# Saved Recordings / Vault list
 @app.get("/api/v1/vault")
 def get_vault_clips():
     files = []
@@ -188,7 +183,6 @@ def get_vault_clips():
                 })
     return files
 
-# Delete clip from Vault
 @app.delete("/api/v1/vault/{filename}")
 def delete_vault_clip(filename: str):
     safe_name = os.path.basename(filename)
@@ -198,7 +192,6 @@ def delete_vault_clip(filename: str):
         return {"status": "DELETED", "filename": safe_name}
     raise HTTPException(status_code=404, detail="File not found")
 
-# Authorized Personnel list
 @app.get("/api/v1/personnel")
 def list_personnel():
     conn = sqlite3.connect(HQ_DB_PATH)
@@ -211,7 +204,6 @@ def list_personnel():
         for r in rows
     ]
 
-# Add new personnel
 @app.post("/api/v1/personnel")
 def add_personnel(person: PersonnelCreate):
     conn = sqlite3.connect(HQ_DB_PATH)
@@ -229,7 +221,6 @@ def add_personnel(person: PersonnelCreate):
     conn.close()
     return {"status": "CREATED", "id": new_id}
 
-# System telemetry metrics
 @app.get("/api/v1/telemetry")
 def get_telemetry():
     conn = sqlite3.connect(HQ_DB_PATH)
@@ -250,13 +241,123 @@ def get_telemetry():
         "system_time": datetime.now().strftime("%H:%M:%S IST")
     }
 
-# Serve alert images and UI
+# ----------------------------------------------------
+# MAP, AUDIT LEDGER & INCIDENT REPORT INTEGRATION
+# ----------------------------------------------------
+@app.get("/map", response_class=HTMLResponse)
+def serve_tactical_map():
+    # Dynamically generate the map on every request to guarantee accuracy
+    map_path = generate_offline_map(BASE_DIR)
+    if os.path.exists(map_path):
+        return FileResponse(map_path)
+    raise HTTPException(status_code=500, detail="Failed to build tactical map.")
+
+@app.get("/ledger", response_class=HTMLResponse)
+def serve_audit_ledger():
+    ledger_path = os.path.join(TEXTS_DIR, "command_audit_ledger.txt")
+    content = open(ledger_path, "r").read() if os.path.exists(ledger_path) else "Audit ledger empty or not yet generated."
+    return f"""
+    <html>
+    <head><title>IBVAP Cryptographic Audit Ledger</title></head>
+    <body style="background-color: #0b0f19; color: #00ff66; font-family: monospace; padding: 25px;">
+        <h2 style="border-bottom: 2px solid #00ff66; padding-bottom: 8px;">🔐 TAMPER-PROOF COMMAND AUDIT LEDGER (SHA-256)</h2>
+        <p><a href="/" style="color: #38bdf8; text-decoration: none;">&larr; Back to Command Dashboard</a></p>
+        <pre style="background: #111827; padding: 15px; border-radius: 5px; border: 1px solid #1f293d; white-space: pre-wrap;">{content}</pre>
+    </body>
+    </html>
+    """
+
+@app.get("/reports", response_class=HTMLResponse)
+def list_incident_reports():
+    files = [f for f in os.listdir(TEXTS_DIR) if f.endswith(".txt") and f != "command_audit_ledger.txt"] if os.path.exists(TEXTS_DIR) else []
+    files.sort(reverse=True)
+    
+    links = "".join([f"<li style='margin-bottom:8px;'><a href='/reports/{f}' style='color:#38bdf8; text-decoration:none;'>📄 {f}</a></li>" for f in files])
+    if not links:
+        links = "<li>No incident reports or shift summaries generated yet.</li>"
+
+    return f"""
+    <html>
+    <head><title>IBVAP Incident Reports</title></head>
+    <body style="background:#0b0f19; color:#00ff66; font-family:monospace; padding:30px;">
+        <h2 style="border-bottom: 2px solid #00ff66; padding-bottom: 8px;">📄 AIR-GAPPED INCIDENT REPORTS & SHIFT SUMMARIES</h2>
+        <p><a href="/" style="color:#00ff66; text-decoration:none;">&larr; Back to Command Dashboard</a></p>
+        <ul style="line-height: 1.8; font-size: 15px; list-style-type: none; padding-left: 0;">{links}</ul>
+    </body>
+    </html>
+    """
+
+@app.get("/reports/{filename}")
+def serve_report(filename: str):
+    file_path = os.path.join(TEXTS_DIR, os.path.basename(filename))
+    if os.path.exists(file_path):
+        return PlainTextResponse(open(file_path, "r").read())
+    raise HTTPException(status_code=404, detail="Report file not found")
+
+# Serve static alert snapshots
 app.mount("/alerts", StaticFiles(directory=ALERTS_DIR), name="alerts")
 
+# ----------------------------------------------------
+# MAIN DASHBOARD (FALLBACK / UNIFIED)
+# ----------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 def serve_index():
     index_path = os.path.join(BASE_DIR, "index.html")
     if os.path.exists(index_path):
         with open(index_path, "r", encoding="utf-8") as f:
             return f.read()
-    return "<h1>index.html not found. Place it in the project root.</h1>"
+
+    # Integrated Fallback Dashboard
+    conn = sqlite3.connect(HQ_DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT id, edge_node_id, timestamp, event_type, threat_level, threat_score, image_hash FROM hq_alerts ORDER BY id DESC LIMIT 15")
+    rows = cur.fetchall()
+    conn.close()
+
+    table_rows = "".join([
+        f"""<tr style="border-bottom: 1px solid #1f293d;">
+            <td style="padding:10px;">#{r[0]}</td>
+            <td style="padding:10px;">{r[2]}</td>
+            <td style="padding:10px;">{r[1]}</td>
+            <td style="padding:10px;">{r[3]}</td>
+            <td style="padding:10px; color:{'#ef4444' if r[4]=='CRITICAL' else '#f97316' if r[4]=='HIGH' else '#eab308' if r[4]=='ELEVATED' else '#22c55e'}; font-weight:bold;">{r[4]} ({r[5]:.0f})</td>
+            <td style="padding:10px; font-family:monospace; color:#64748b;">{r[6][:14]}...</td>
+        </tr>""" for r in rows
+    ]) or "<tr><td colspan='6' style='padding:20px; text-align:center; color:#64748b;'>No intrusions recorded yet.</td></tr>"
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>IBVAP Tactical Command Center</title>
+        <style>
+            body {{ background-color: #04070a; color: #00ff66; font-family: 'Courier New', monospace; margin: 0; padding: 25px; }}
+            h1 {{ margin-top: 0; border-bottom: 2px solid #00ff66; padding-bottom: 10px; font-size: 24px; }}
+            .nav-bar {{ margin-bottom: 25px; display: flex; gap: 15px; }}
+            .btn {{ background: #111827; border: 1px solid #00ff66; color: #00ff66; padding: 10px 18px; text-decoration: none; font-weight: bold; border-radius: 4px; display: inline-block; }}
+            .btn:hover {{ background: #00ff66; color: #04070a; }}
+            table {{ width: 100%; border-collapse: collapse; background: #0a0f18; border: 1px solid #1f293d; }}
+            th {{ background: #111827; color: #fff; text-align: left; padding: 12px; border-bottom: 1px solid #1f293d; }}
+        </style>
+    </head>
+    <body>
+        <h1>🛡️ IBVAP TACTICAL COMMAND HQ</h1>
+        <div class="nav-bar">
+            <a href="/map" class="btn">🗺️ Tactical Map</a>
+            <a href="/ledger" class="btn">📝 Audit Ledger</a>
+            <a href="/reports" class="btn">📄 Incident Reports</a>
+            <a href="/api/v1/vault" class="btn">📹 Vault API</a>
+            <a href="/api/v1/personnel" class="btn">👥 Personnel API</a>
+        </div>
+        <h3>LIVE EDGE TELEMETRY & BREACH LEDGER</h3>
+        <table>
+            <thead>
+                <tr><th>ID</th><th>TIMESTAMP</th><th>NODE</th><th>EVENT</th><th>THREAT LEVEL</th><th>HASH</th></tr>
+            </thead>
+            <tbody>
+                {table_rows}
+            </tbody>
+        </table>
+    </body>
+    </html>
+    """
